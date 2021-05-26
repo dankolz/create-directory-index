@@ -1,0 +1,24 @@
+{
+  "name": "@dankolz/create-directory-index",
+  "version": "1.0.0",
+  "description": "creates an index of a directory and its sub-directories",
+  "main": "index.js",
+  "scripts": {
+    "test": "node_modules/mocha/bin/mocha",
+    "testDebug": "node_modules/mocha/bin/mocha --inspect-brk"
+  },
+  "bin": {
+    "create-directory-index-command": "./create-directory-index-command.js",
+    "create-update-directory-command": "./create-update-directory-commands.js"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "add-callback-to-promise": "^1.0.1",
+    "minimist": "^1.2.5"
+  },
+  "devDependencies": {
+    "chai": "^4.3.4",
+    "mocha": "^8.4.0"
+  }
+}
