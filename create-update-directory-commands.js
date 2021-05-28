@@ -113,11 +113,11 @@ function createCopyStatement(key) {
 	let dst = sanitize(destResolve(path.join(destOptions.directoryPath, key)))
 	let pgm	
 	let keepVerbose = true
-	if(sourceOptions.type = 'ssh') {
+	if(sourceOptions.type == 'ssh') {
 		pgm = 'put'
 		keepVerbose = false
 	}
-	else if(destOptions.type = 'ssh') {
+	else if(destOptions.type == 'ssh') {
 		pgm = 'get'
 		keepVerbose = false
 	}
