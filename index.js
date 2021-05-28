@@ -2,18 +2,40 @@ const { spawn } = require("child_process");
 const addCallbackToPromise = require('add-callback-to-promise')
 const path = require('path')
 const parser = require('./parse-time-size-path-entry')
+const readline = require('readline');
 
-let createIndex = (directoryPath, callback) => {
-	directoryPath = path.resolve(directoryPath)
+let createIndex = (directoryPath, options = {}, callback) => {
 
+	options = Object.assign({
+		type: 'fs'
+	}, options)
+	
 	//`find ${directoryPath} -type f -printf "%T@ %s %P\n"`
-	const findProcess = spawn("find", [directoryPath, "-type", "f", "-printf", "%T@ %s %P\\n"]);
+	
+	let findProcess 
+	if(options.type == 'fs') {
+		directoryPath = path.resolve(directoryPath)
+		findProcess = spawn("find", [directoryPath, "-type", "f", "-printf", "%T@ %s %P\\n"]);
+	}
+	else if(options.type == 'ssh') {
+		findProcess = spawn("ssh", [options.server, `find ${directoryPath} -type f -printf "%T@ %s %P\\n"`]);
+	}
+
 	let p = new Promise((resolve, reject) => {
-		// Some code here
-		let result = ''
+		let entries = []
 		let errResult = ''
-		findProcess.stdout.on('data', data => {
-			result += data
+		
+		
+		let readFind = readline.createInterface({
+			input: findProcess.stdout,
+			console: false
+		})
+		readFind.on('line', function(line) {
+			try {
+				entries.push(parser(line))
+			} catch(e) { 
+				errResult += e.toString()
+			}
 		})
 		findProcess.stderr.on('data', data => {
 			errResult += data
@@ -23,10 +45,9 @@ let createIndex = (directoryPath, callback) => {
 			return reject(error)
 		})
 		findProcess.on('close', code => {
-			if(errResult && !result) {
+			if(errResult && entries.length == 0) {
 				return reject(new Error(errResult))
 			}
-			let entries = result.split('\n').map(parser)
 			let resultObject = {
 				creationDate: new Date(),
 				entries: entries

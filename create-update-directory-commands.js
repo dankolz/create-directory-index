@@ -1,6 +1,12 @@
 #!/usr/local/bin/node
-let argv = require('minimist')(process.argv.slice(2));
+let argv = require('minimist')(process.argv.slice(2), {
+	boolean: ['vo', 'verbose-output', 'dont-overwrite', 'v', 'n']
+});
 const path = require('path')
+const isSSH = require('./looks-like-ssh-path')
+const createSSHOptions = require('./create-ssh-options')
+
+
 let createIndex = require('./index')
 const pathReducer = require('./entries-by-path-reducer')
 const sanitize = (name) => {
@@ -24,11 +30,11 @@ create-update-directory-commands <options> <source_directory_path> <destination_
 Options:
 
 -v
---vo=true Versbose Output - creates echo commands to trac progress
---verbose-output=true
+--vo Versbose Output - creates echo commands to trac progress
+--verbose-output
 
--n
---no-overwrite=true Will not overwrite a destination file
+-n no-clobbler (don't overwrite)
+--dont-overwrite Will not overwrite a destination file
 	`)	
 	
 	
@@ -51,58 +57,105 @@ if(argv._.length != 2) {
 	return
 }
 let verboseOutput = false
-if(argv.vo) {
-	verboseOutput = true
-}
-if(argv['v']) {
-	verboseOutput = true
-}
-if(argv['verbose-output']) {
+if(argv.vo || argv.v || argv['verbose-output']) {
 	verboseOutput = true
 }
 
 let noOverwrite = false
-if(argv['n']) {
-	noOverwrite = true
-}
-if(argv['no-overwrite']) {
+if(argv['n'] || argv['dont-overwrite']) {
 	noOverwrite = true
 }
 
-let sourceDir = path.resolve(argv._[0])
-let destDir = path.resolve(argv._[1])
+let sourcePath = argv._[0]
+let destPath = argv._[1]
 
-let pSource = createIndex(sourceDir)
-let pDest = createIndex(destDir)
+function createOptions(path) {
+	let options = {
+		directoryPath: path,
+		fullPath: path,
+		type: 'fs'
+	}
+	if(isSSH(path)) {
+		options = createSSHOptions(path)	
+	}
+	return options
+}
+
+let sourceOptions = createOptions(sourcePath)
+let destOptions = createOptions(destPath)
+
+let pSource = createIndex(sourceOptions.directoryPath, sourceOptions)
+let pDest = createIndex(destOptions.directoryPath, destOptions)
 
 let createdDirs = {}
+let srcResolve
+if(sourceOptions.type == 'fs') {
+	srcResolve = (p) => path.resolve(p)
+}
+else {
+	srcResolve = (p) => p
+}
+
+let destResolve
+if(destOptions.type == 'fs') {
+	destResolve = (p) => path.resolve(p)
+}
+else {
+	destResolve = (p) => p
+}
+
+let createDirStatements = ""
+let cpFileStatements = ""
 
 function createCopyStatement(key) {
 	let result = ''
-	let src = sanitize(path.join(sourceDir, key))
-	let dst = sanitize(path.join(destDir, key))
-	if(verboseOutput) {
-		result += `echo cp ${src} ${dst}\n`
+	let src = sanitize(srcResolve(path.join(sourceOptions.directoryPath, key)))
+	let dst = sanitize(destResolve(path.join(destOptions.directoryPath, key)))
+	let pgm	
+	let keepVerbose = true
+	if(sourceOptions.type = 'ssh') {
+		pgm = 'put'
+		keepVerbose = false
 	}
-	result += `cp ${src} ${dst}\n`
-	return result
+	else if(destOptions.type = 'ssh') {
+		pgm = 'get'
+		keepVerbose = false
+	}
+	else {
+		pgm = 'cp'
+	}
+	
+//	let srcPrefix = sourceOptions.type == 'ssh' ? sourceOptions.server + ':' : ''	
+//	let dstPrefix = destOptions.type == 'ssh' ? destOptions.server + ':' : ''	
+//	let cmd = `${pgm} ${srcPrefix}${src} ${dstPrefix}${dst}`
+	let cmd = `${pgm} ${src} ${dst}`
+	if(verboseOutput && keepVerbose) {
+		result += `echo ${cmd}\n`
+	}
+	cpFileStatements += `${cmd}\n`
 }
 
 function createCopyStatementWithDir(key) {
-	let dst = path.join(destDir, key)
+	let dst = path.join(destOptions.directoryPath, key)
 	let dir = path.parse(dst).dir
 	if(!createdDirs[dir]) {
 		let result = ''
 		createdDirs[dir] = true
-		let san = sanitize(dir)
-		if(verboseOutput) {
-			result += `echo mkdir -p ${san}\n`	
+		let san = sanitize(destResolve(dir))
+		
+		let cmd 
+		if(destOptions.type == 'ssh') {
+			cmd = `ssh ${destOptions.server} mkdir -p ${san}\n`
+		}	
+		else {
+			cmd = `mkdir -p ${san}\n`
 		}
-		result += `mkdir -p ${san}\n`
-		result += createCopyStatement(key)
-		return result
+		if(verboseOutput) {
+			result += `echo ${cmd}`	
+		}
+		createDirStatements += cmd
 	}
-	return createCopyStatement(key)
+	createCopyStatement(key)
 }
 
 Promise.all([pSource, pDest]).then(indexes => {
@@ -113,13 +166,24 @@ Promise.all([pSource, pDest]).then(indexes => {
 		let destEntry = destPathMap[key]
 		
 		if(!destEntry) {
-			console.log(createCopyStatementWithDir(key))
+			createCopyStatementWithDir(key)
 		}
 		else if(!noOverwrite) {
 			if(sourceEntry.time > destEntry.time) {
-				console.log(createCopyStatement(key))
+				createCopyStatement(key)
 			}
 		}
+	}
+	
+	console.log(createDirStatements)
+	let isSFTP = sourceOptions.type == 'ssh' || destOptions.type == 'ssh'
+	if(isSFTP) {
+		let server = sourceOptions.server || destOptions.server
+		console.log(`sftp ${server} << EOF`)
+	}
+	console.log(cpFileStatements)
+	if(isSFTP) {
+		console.log('EOF')
 	}
 	
 
