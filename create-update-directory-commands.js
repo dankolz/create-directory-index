@@ -17,8 +17,12 @@ const sanitize = (name) => {
 	name = name.split('$').join('\\$')
 	name = name.split(' ').join('\\ ')
 	name = name.split(':').join('\\:')
+	name = name.split(';').join('\\;')
 	name = name.split('(').join('\\(')
 	name = name.split(')').join('\\)')
+	name = name.split('?').join('\\?')
+	name = name.split('&').join('\\&')
+	name = name.split('|').join('\\|')
 	return name
 }
 
