@@ -7,7 +7,8 @@ const readline = require('readline');
 let createIndex = (directoryPath, options = {}, callback) => {
 
 	options = Object.assign({
-		type: 'fs'
+		type: 'fs',
+		outputStream: null
 	}, options)
 	
 	//`find ${directoryPath} -type f -printf "%T@ %s %P\n"`
@@ -24,7 +25,17 @@ let createIndex = (directoryPath, options = {}, callback) => {
 	let p = new Promise((resolve, reject) => {
 		let entries = []
 		let errResult = ''
+		let resultObject = {
+			creationDate: new Date(),
+			entries: entries
+		}
 		
+		if(options.outputStream) {
+			resultObject.format = "streaming-entries-header"
+			delete resultObject.entries
+			options.outputStream.write(JSON.stringify(resultObject))
+			options.outputStream.write('\n')
+		}
 		
 		let readFind = readline.createInterface({
 			input: findProcess.stdout,
@@ -32,7 +43,15 @@ let createIndex = (directoryPath, options = {}, callback) => {
 		})
 		readFind.on('line', function(line) {
 			try {
-				entries.push(parser(line))
+				if(options.outputStream) {
+					let entry = parser(line)
+					entry.format = 'entry'
+					options.outputStream.write(JSON.stringify(entry))
+					options.outputStream.write('\n')
+				}
+				else {
+					entries.push(parser(line))
+				}
 			} catch(e) { 
 				errResult += e.toString()
 			}
@@ -45,12 +64,12 @@ let createIndex = (directoryPath, options = {}, callback) => {
 			return reject(error)
 		})
 		findProcess.on('close', code => {
-			if(errResult && entries.length == 0) {
+
+			if(!options.outputStream && errResult && entries.length == 0) {
 				return reject(new Error(errResult))
 			}
-			let resultObject = {
-				creationDate: new Date(),
-				entries: entries
+			if(errResult) {
+				resultObject.errors = errResult
 			}
 			resolve(resultObject)
 		})

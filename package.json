@@ -1,6 +1,6 @@
 {
   "name": "@dankolz/create-directory-index",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "creates an index of a directory and its sub-directories",
   "main": "index.js",
   "scripts": {

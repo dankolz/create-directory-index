@@ -5,7 +5,8 @@ let argv = require('minimist')(process.argv.slice(2), {
 const path = require('path')
 const isSSH = require('./looks-like-ssh-path')
 const createSSHOptions = require('./create-ssh-options')
-
+const fs = require('fs')
+const readline = require('readline');
 
 let createIndex = require('./index')
 const pathReducer = require('./entries-by-path-reducer')
@@ -35,6 +36,9 @@ Options:
 
 -n no-clobbler (don't overwrite)
 --dont-overwrite Will not overwrite a destination file
+
+--source-index Instead of calculating the source index, use an index file
+--destination-index Instead of calculating the destination index, use an index file
 	`)	
 	
 	
@@ -66,6 +70,9 @@ if(argv['n'] || argv['dont-overwrite']) {
 	noOverwrite = true
 }
 
+let sourceIndex = argv['source-index']
+let destinationIndex = argv['destination-index']
+
 let sourcePath = argv._[0]
 let destPath = argv._[1]
 
@@ -81,11 +88,71 @@ function createOptions(path) {
 	return options
 }
 
+function parseIndex(location) {
+	let p = new Promise((resolve, reject) => {
+		let streamingEntries
+		if(location.endsWith('ndjson') || location.endsWith('jsonl')) {
+			let fileStream = fs.createReadStream(location)
+			let readJson = readline.createInterface({
+				input: fileStream,
+				console: false
+			})
+			readJson.on('line', function(line) {
+				if(!line) {
+					return
+				}
+				try {
+					let obj = JSON.parse(line)
+					if(obj.format == 'streaming-entries-header') {
+						streamingEntries = obj
+						streamingEntries.entries = []
+					}
+					else if(obj.format == 'entry') {
+						streamingEntries.entries.push(obj)
+					}
+
+				}
+				catch(e) {
+					reject(e)
+				}
+			})
+			fileStream.on('close', code =>{
+				resolve(streamingEntries)
+			})
+		}	
+		else {
+			resolve(JSON.parse(fs.readFileSync(location)))
+		}
+
+	})
+	
+	return p
+
+}
+
 let sourceOptions = createOptions(sourcePath)
 let destOptions = createOptions(destPath)
 
-let pSource = createIndex(sourceOptions.directoryPath, sourceOptions)
-let pDest = createIndex(destOptions.directoryPath, destOptions)
+let pSource 
+let pDest 
+
+async function createIndexes() {
+	if(sourceIndex) {
+		pSource = parseIndex(sourceIndex)
+	}
+	else {
+		pSource = createIndex(sourceOptions.directoryPath, sourceOptions)
+	}
+	if(destinationIndex) {
+		pDest = parseIndex(destinationIndex)
+	}
+	else {
+		pDest = createIndex(destOptions.directoryPath, destOptions)
+	}
+}
+
+createIndexes()
+
 
 let createdDirs = {}
 let srcResolve
@@ -190,3 +257,4 @@ Promise.all([pSource, pDest]).then(indexes => {
 }).catch(error => {
 	console.error(error)
 })
+

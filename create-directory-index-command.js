@@ -4,7 +4,7 @@ const createSSHOptions = require('./create-ssh-options')
 
 
 let argv = require('minimist')(process.argv.slice(2), {
-	boolean: ['f', 'formatted']
+	boolean: ['f', 'formatted', 's']
 });
 
 if(argv.help) {
@@ -18,6 +18,9 @@ Options:
 
 -f
 --formatted Format JSON to be more human readable
+
+-s stream results Produces a JSON stream instead of a single JSON object
+These streams should be save with the extension .ndjson or .jsonl
 	`)	
 	
 	
@@ -46,12 +49,21 @@ let options = {
 if(isSSH(fullPath)) {
 	options = createSSHOptions(fullPath)	
 }
+
+if(argv.s) {
+	options.outputStream = process.stdout
+}
 createIndex(options.directoryPath, options).then(data => {
-	if(formatted) {
-		console.log(JSON.stringify(data, null, '\t'))
+	if(options.outputStream) {
+		options.outputStream.end()
 	}
 	else {
-		console.log(JSON.stringify(data))
+		if(formatted) {
+			console.log(JSON.stringify(data, null, '\t'))
+		}
+		else {
+			console.log(JSON.stringify(data))
+		}
 	}
 }).catch(error => {
 	console.error(error)
