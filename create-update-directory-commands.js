@@ -177,6 +177,7 @@ else {
 
 let createDirStatements = ""
 let cpFileStatements = ""
+let dirsToCreate = []
 
 function createCopyStatement(key) {
 	let result = ''
@@ -185,11 +186,11 @@ function createCopyStatement(key) {
 	let pgm	
 	let keepVerbose = true
 	if(sourceOptions.type == 'ssh') {
-		pgm = 'put'
+		pgm = 'get'
 		keepVerbose = false
 	}
 	else if(destOptions.type == 'ssh') {
-		pgm = 'get'
+		pgm = 'put'
 		keepVerbose = false
 	}
 	else {
@@ -216,15 +217,18 @@ function createCopyStatementWithDir(key) {
 		
 		let cmd 
 		if(destOptions.type == 'ssh') {
-			cmd = `ssh ${destOptions.server} mkdir -p ${san}\n`
+			dirsToCreate.push(san)
 		}	
 		else {
 			cmd = `mkdir -p ${san}\n`
 		}
-		if(verboseOutput) {
+		if(verboseOutput && cmd) {
 			result += `echo ${cmd}`	
 		}
-		createDirStatements += cmd
+		if(cmd) {
+			createDirStatements += cmd
+		}
+		
 	}
 	createCopyStatement(key)
 }
@@ -245,6 +249,23 @@ Promise.all([pSource, pDest]).then(indexes => {
 			}
 		}
 	}
+	
+	if(dirsToCreate.length > 0) {
+		let cums = []
+		let cum = ''
+		while(dirsToCreate.length > 0) {
+			cum += dirsToCreate.pop() + ' '
+			if(cum.length > 98000) {
+				cums.push(cum)
+				cum = ''
+			}
+		}
+		cums.push(cum)
+		cums.forEach(servers => {
+			cmd = `ssh ${destOptions.server} mkdir -p ${servers}\n`
+			createDirStatements += cmd
+		})
+	}	
 	
 	console.log(createDirStatements)
 	let isSFTP = sourceOptions.type == 'ssh' || destOptions.type == 'ssh'
