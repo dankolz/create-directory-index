@@ -23,6 +23,9 @@ const sanitize = (name) => {
 	name = name.split('?').join('\\?')
 	name = name.split('&').join('\\&')
 	name = name.split('|').join('\\|')
+	name = name.split('[').join('\\[')
+	name = name.split(']').join('\\]')
+	name = name.split('#').join('\\#')
 	return name
 }
 
@@ -180,7 +183,6 @@ let cpFileStatements = ""
 let dirsToCreate = []
 
 function createCopyStatement(key) {
-	let result = ''
 	let src = sanitize(srcResolve(path.join(sourceOptions.directoryPath, key)))
 	let dst = sanitize(destResolve(path.join(destOptions.directoryPath, key)))
 	let pgm	
@@ -202,7 +204,7 @@ function createCopyStatement(key) {
 //	let cmd = `${pgm} ${srcPrefix}${src} ${dstPrefix}${dst}`
 	let cmd = `${pgm} ${src} ${dst}`
 	if(verboseOutput && keepVerbose) {
-		result += `echo ${cmd}\n`
+		cpFileStatements += `echo ${cmd}\n`
 	}
 	cpFileStatements += `${cmd}\n`
 }
