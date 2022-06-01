@@ -29,11 +29,13 @@ const sanitize = (name) => {
 	return name
 }
 
-if(argv.help) {
+if (argv.help) {
 	console.error(`
 Outputs a script which will copy files from the first directory to the second directory if missing or newer. The command has the format:
 
 create-update-directory-commands <options> <source_directory_path> <destination_directory_path>
+
+Source and destination can be absolute directories, relative directories, or ssh locations (e.g. mymachine:/tmp/stuff).
 
 Options:
 
@@ -46,9 +48,9 @@ Options:
 
 --source-index Instead of calculating the source index, use an index file
 --destination-index Instead of calculating the destination index, use an index file
-	`)	
-	
-	
+	`)
+
+
 	return
 }
 
@@ -62,18 +64,18 @@ argv._ = argv._.filter(entry => {
 })
 */
 
-if(argv._.length != 2) {
-	console.log('Must specify a directores to update.')
+if (argv._.length != 2) {
+	console.log('Must specify directories to update.')
 	console.log(JSON.stringify(argv))
 	return
 }
 let verboseOutput = false
-if(argv.vo || argv.v || argv['verbose-output']) {
+if (argv.vo || argv.v || argv['verbose-output']) {
 	verboseOutput = true
 }
 
 let noOverwrite = false
-if(argv['n'] || argv['dont-overwrite']) {
+if (argv['n'] || argv['dont-overwrite']) {
 	noOverwrite = true
 }
 
@@ -89,8 +91,8 @@ function createOptions(path) {
 		fullPath: path,
 		type: 'fs'
 	}
-	if(isSSH(path)) {
-		options = createSSHOptions(path)	
+	if (isSSH(path)) {
+		options = createSSHOptions(path)
 	}
 	return options
 }
@@ -98,41 +100,41 @@ function createOptions(path) {
 function parseIndex(location) {
 	let p = new Promise((resolve, reject) => {
 		let streamingEntries
-		if(location.endsWith('ndjson') || location.endsWith('jsonl')) {
+		if (location.endsWith('ndjson') || location.endsWith('jsonl')) {
 			let fileStream = fs.createReadStream(location)
 			let readJson = readline.createInterface({
 				input: fileStream,
 				console: false
 			})
-			readJson.on('line', function(line) {
-				if(!line) {
+			readJson.on('line', function (line) {
+				if (!line) {
 					return
 				}
 				try {
 					let obj = JSON.parse(line)
-					if(obj.format == 'streaming-entries-header') {
+					if (obj.format == 'streaming-entries-header') {
 						streamingEntries = obj
 						streamingEntries.entries = []
 					}
-					else if(obj.format == 'entry') {
+					else if (obj.format == 'entry') {
 						streamingEntries.entries.push(obj)
 					}
 
 				}
-				catch(e) {
+				catch (e) {
 					reject(e)
 				}
 			})
-			fileStream.on('close', code =>{
+			fileStream.on('close', code => {
 				resolve(streamingEntries)
 			})
-		}	
+		}
 		else {
 			resolve(JSON.parse(fs.readFileSync(location)))
 		}
 
 	})
-	
+
 	return p
 
 }
@@ -140,17 +142,20 @@ function parseIndex(location) {
 let sourceOptions = createOptions(sourcePath)
 let destOptions = createOptions(destPath)
 
-let pSource 
-let pDest 
+let isSFTP = sourceOptions.type == 'ssh' || destOptions.type == 'ssh'
+let isDualSFTP = sourceOptions.type == 'ssh' && destOptions.type == 'ssh'
+
+let pSource
+let pDest
 
 async function createIndexes() {
-	if(sourceIndex) {
+	if (sourceIndex) {
 		pSource = parseIndex(sourceIndex)
 	}
 	else {
 		pSource = createIndex(sourceOptions.directoryPath, sourceOptions)
 	}
-	if(destinationIndex) {
+	if (destinationIndex) {
 		pDest = parseIndex(destinationIndex)
 	}
 	else {
@@ -160,10 +165,16 @@ async function createIndexes() {
 
 createIndexes()
 
+let timestamp = (new Date().getTime()) + ''
+
+function getTempDirectory() {
+	return '/tmp/create-directory-index-' + timestamp
+}
+
 
 let createdDirs = {}
 let srcResolve
-if(sourceOptions.type == 'fs') {
+if (sourceOptions.type == 'fs') {
 	srcResolve = (p) => path.resolve(p)
 }
 else {
@@ -171,7 +182,7 @@ else {
 }
 
 let destResolve
-if(destOptions.type == 'fs') {
+if (destOptions.type == 'fs') {
 	destResolve = (p) => path.resolve(p)
 }
 else {
@@ -180,106 +191,142 @@ else {
 
 let createDirStatements = ""
 let cpFileStatements = ""
+let intermediateCpFileStatements = ""
 let dirsToCreate = []
+let intermediateDirsToCreate = []
 
 function createCopyStatement(key) {
 	let src = sanitize(srcResolve(path.join(sourceOptions.directoryPath, key)))
 	let dst = sanitize(destResolve(path.join(destOptions.directoryPath, key)))
-	let pgm	
+	let pgm
 	let keepVerbose = true
-	if(sourceOptions.type == 'ssh') {
-		pgm = 'get'
-		keepVerbose = false
-	}
-	else if(destOptions.type == 'ssh') {
-		pgm = 'put'
-		keepVerbose = false
+	if (sourceOptions.type == 'ssh' && destOptions.type == 'ssh') {
+		let temp = sanitize(path.resolve(path.join(getTempDirectory(), key)))
+		let cmd = `get ${src} ${temp}`
+		intermediateCpFileStatements += `${cmd}\n`
+
+		cmd = `put ${temp} ${dst}`
+		cpFileStatements += `${cmd}\n`
+
 	}
 	else {
-		pgm = 'cp'
+		if (sourceOptions.type == 'ssh') {
+			pgm = 'get'
+			keepVerbose = false
+		}
+		else if (destOptions.type == 'ssh') {
+			pgm = 'put'
+			keepVerbose = false
+		}
+		else {
+			pgm = 'cp'
+		}
+
+		let cmd = `${pgm} ${src} ${dst}`
+		if (verboseOutput && keepVerbose) {
+			cpFileStatements += `echo ${cmd}\n`
+		}
+		cpFileStatements += `${cmd}\n`
 	}
-	
-//	let srcPrefix = sourceOptions.type == 'ssh' ? sourceOptions.server + ':' : ''	
-//	let dstPrefix = destOptions.type == 'ssh' ? destOptions.server + ':' : ''	
-//	let cmd = `${pgm} ${srcPrefix}${src} ${dstPrefix}${dst}`
-	let cmd = `${pgm} ${src} ${dst}`
-	if(verboseOutput && keepVerbose) {
-		cpFileStatements += `echo ${cmd}\n`
-	}
-	cpFileStatements += `${cmd}\n`
 }
 
 function createCopyStatementWithDir(key) {
 	let dst = path.join(destOptions.directoryPath, key)
 	let dir = path.parse(dst).dir
-	if(!createdDirs[dir]) {
-		let result = ''
+	if (!createdDirs[dir]) {
 		createdDirs[dir] = true
 		let san = sanitize(destResolve(dir))
-		
-		let cmd 
-		if(destOptions.type == 'ssh') {
+
+		let cmd
+		if (destOptions.type == 'ssh') {
 			dirsToCreate.push(san)
-		}	
+		}
 		else {
 			cmd = `mkdir -p ${san}\n`
-		}
-		if(verboseOutput && cmd) {
-			result += `echo ${cmd}`	
-		}
-		if(cmd) {
+			if (verboseOutput) {
+				createDirStatements += `echo ${cmd}`
+			}
 			createDirStatements += cmd
 		}
 		
+		if(isDualSFTP) {
+			let intDst = path.join(getTempDirectory(), key)
+			let intDir = path.parse(intDst).dir
+			intermediateDirsToCreate.push(sanitize(intDir))
+
+		}
 	}
 	createCopyStatement(key)
 }
 
+function createServerStrings(directories) {
+	let cums = []
+	let cum = ''
+	while (directories.length > 0) {
+		cum += directories.pop() + ' '
+		if (cum.length > 98000) {
+			cums.push(cum)
+			cum = ''
+		}
+	}
+	cums.push(cum)
+	return cums
+}
+
 Promise.all([pSource, pDest]).then(indexes => {
 	let destPathMap = indexes[1].entries.reduce(pathReducer, {})
-	
-	for(let sourceEntry of indexes[0].entries) {
+
+	for (let sourceEntry of indexes[0].entries) {
 		let key = sourceEntry.path
 		let destEntry = destPathMap[key]
-		
-		if(!destEntry) {
+
+		if (!destEntry) {
 			createCopyStatementWithDir(key)
 		}
-		else if(!noOverwrite) {
-			if(sourceEntry.time > destEntry.time) {
+		else if (!noOverwrite) {
+			if (sourceEntry.time > destEntry.time) {
 				createCopyStatement(key)
 			}
 		}
 	}
-	
-	if(dirsToCreate.length > 0) {
-		let cums = []
-		let cum = ''
-		while(dirsToCreate.length > 0) {
-			cum += dirsToCreate.pop() + ' '
-			if(cum.length > 98000) {
-				cums.push(cum)
-				cum = ''
-			}
-		}
-		cums.push(cum)
-		cums.forEach(servers => {
-			cmd = `ssh ${destOptions.server} mkdir -p ${servers}\n`
+
+
+	if(isDualSFTP) {
+		let tempDir = getTempDirectory()
+		console.log(`mkdir -p ${tempDir}`)
+		let cums = createServerStrings(intermediateDirsToCreate)
+		cums.forEach(directories => {
+			console.log(`mkdir -p ${directories}\n`)
+		})
+	}
+	if (dirsToCreate.length > 0) {
+		let cums = createServerStrings(dirsToCreate)
+		cums.forEach(directories => {
+			cmd = `ssh ${destOptions.server} mkdir -p ${directories}\n`
 			createDirStatements += cmd
 		})
-	}	
-	
+	}
+
 	console.log(createDirStatements)
-	let isSFTP = sourceOptions.type == 'ssh' || destOptions.type == 'ssh'
-	if(isSFTP) {
-		let server = sourceOptions.server || destOptions.server
+	if(isDualSFTP) {
+		console.log(`sftp ${sourceOptions.server} << EOF`)
+		console.log(intermediateCpFileStatements)
+		console.log('EOF\n\n')
+		
+	}
+	if (isSFTP) {
+		let server = destOptions.server || sourceOptions.server  
 		console.log(`sftp ${server} << EOF`)
 	}
 	console.log(cpFileStatements)
-	if(isSFTP) {
+	if (isSFTP) {
 		console.log('EOF')
 	}
-	
+	if(isDualSFTP) {
+		let tempDir = getTempDirectory()
+		console.log(`rm -rf ${tempDir}`)
+	}
+
 
 }).catch(error => {
 	console.error(error)
