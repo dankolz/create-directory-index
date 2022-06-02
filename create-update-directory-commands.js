@@ -263,7 +263,7 @@ function createServerStrings(directories) {
 	let cums = []
 	let cum = ''
 	while (directories.length > 0) {
-		cum += directories.pop() + ' '
+		cum += '"' + directories.pop() + '" '
 		if (cum.length > 98000) {
 			cums.push(cum)
 			cum = ''
