@@ -1,6 +1,6 @@
 #!/usr/local/bin/node
 let argv = require('minimist')(process.argv.slice(2), {
-	boolean: ['vo', 'verbose-output', 'dont-overwrite', 'v', 'n']
+	boolean: ['vo', 'verbose-output', 'dont-overwrite', 'force-clobber-by-size', 'v', 'n']
 });
 const path = require('path')
 const isSSH = require('./looks-like-ssh-path')
@@ -42,11 +42,14 @@ Source and destination can be absolute directories, relative directories, or ssh
 Options:
 
 -v
---vo Versbose Output - creates echo commands to trac progress
+--vo Versbose Output - creates echo commands to track progress
 --verbose-output
 
--n no-clobbler (don't overwrite)
+-n no-clobber (don't overwrite)
 --dont-overwrite Will not overwrite a destination file
+
+
+--force-clobber-by-size clobber (overwrite) the destination file with the source file if they disagree in size regardless of the timestamps
 
 --source-index Instead of calculating the source index, use an index file
 --destination-index Instead of calculating the destination index, use an index file
@@ -72,13 +75,19 @@ if (argv._.length != 2) {
 	return
 }
 let verboseOutput = false
+let noOverwrite = false
+let forceClobberBySize = false
+
 if (argv.vo || argv.v || argv['verbose-output']) {
 	verboseOutput = true
 }
 
-let noOverwrite = false
 if (argv['n'] || argv['dont-overwrite']) {
 	noOverwrite = true
+}
+
+if (argv['force-clobber-by-size']) {
+	forceClobberBySize = true
 }
 
 let sourceIndex = argv['source-index']
@@ -175,6 +184,7 @@ function getTempDirectory() {
 
 
 let createdDirs = {}
+let intermediateCreatedDirs = {}
 let srcResolve
 if (sourceOptions.type == 'fs') {
 	srcResolve = (p) => path.resolve(p)
@@ -239,6 +249,21 @@ function createCopyStatement(key) {
 	}
 }
 
+function createIntermediateDir(key) {
+	let dst = path.join(destOptions.directoryPath, key)
+	let dir = path.parse(dst).dir
+	if (!intermediateCreatedDirs[dir]) {
+		intermediateCreatedDirs[dir] = true
+		if(isDualSFTP) {
+			let intDst = path.join(getTempDirectory(), key)
+			let intDir = path.parse(intDst).dir
+			intermediateDirsToCreate.push(sanitize(intDir))
+
+		}
+	}
+
+}
+
 function createCopyStatementWithDir(key) {
 	let dst = path.join(destOptions.directoryPath, key)
 	let dir = path.parse(dst).dir
@@ -257,14 +282,8 @@ function createCopyStatementWithDir(key) {
 			}
 			createDirStatements += cmd
 		}
-		
-		if(isDualSFTP) {
-			let intDst = path.join(getTempDirectory(), key)
-			let intDir = path.parse(intDst).dir
-			intermediateDirsToCreate.push(sanitize(intDir))
-
-		}
 	}
+	createIntermediateDir(key)
 	createCopyStatement(key)
 }
 
@@ -293,7 +312,15 @@ Promise.all([pSource, pDest]).then(indexes => {
 			createCopyStatementWithDir(key)
 		}
 		else if (!noOverwrite) {
+			let copyKey = false
+			if(forceClobberBySize && sourceEntry.size != destEntry.size) {
+				copyKey = true
+			}
 			if (sourceEntry.time > destEntry.time) {
+				copyKey = true
+			}
+			if(copyKey) {
+				createIntermediateDir(key)
 				createCopyStatement(key)
 			}
 		}
