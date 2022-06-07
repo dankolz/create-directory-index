@@ -29,6 +29,8 @@ const sanitize = (name) => {
 	return name
 }
 
+const doubleBackspaceEscape = require('./double-backspace-escpae')
+
 if (argv.help) {
 	console.error(`
 Outputs a script which will copy files from the first directory to the second directory if missing or newer. The command has the format:
@@ -168,7 +170,7 @@ createIndexes()
 let timestamp = (new Date().getTime()) + ''
 
 function getTempDirectory() {
-	return '/tmp/create-directory-index-' + timestamp
+	return (process.env.TMPDIR || '/tmp') + '/create-directory-index-' + timestamp
 }
 
 
@@ -202,6 +204,9 @@ function createCopyStatement(key) {
 	let keepVerbose = true
 	if (sourceOptions.type == 'ssh' && destOptions.type == 'ssh') {
 		let temp = sanitize(path.resolve(path.join(getTempDirectory(), key)))
+		temp = doubleBackspaceEscape(temp)
+		src = doubleBackspaceEscape(src)
+		dst = doubleBackspaceEscape(dst)
 		let cmd = `get ${src} ${temp}`
 		intermediateCpFileStatements += `${cmd}\n`
 
@@ -213,10 +218,14 @@ function createCopyStatement(key) {
 		if (sourceOptions.type == 'ssh') {
 			pgm = 'get'
 			keepVerbose = false
+			src = doubleBackspaceEscape(src)
+			dst = doubleBackspaceEscape(dst)
 		}
 		else if (destOptions.type == 'ssh') {
 			pgm = 'put'
 			keepVerbose = false
+			src = doubleBackspaceEscape(src)
+			dst = doubleBackspaceEscape(dst)
 		}
 		else {
 			pgm = 'cp'
